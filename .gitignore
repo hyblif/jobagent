@@ -13,6 +13,9 @@ env/
 # Run outputs
 runs/
 
+# Local agent memory
+AGENTS.md
+
 # Private corpus (commit only the sample files)
 data/baguwen/private/
 

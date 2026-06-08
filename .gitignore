@@ -1,0 +1,50 @@
+# Environment
+.env
+.env.local
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Vector store
+.chroma/
+
+# Run outputs
+runs/
+
+# Private corpus (commit only the sample files)
+data/baguwen/private/
+
+# Keep sample baguwen files
+!data/baguwen/os.md
+!data/baguwen/python.md
+!data/baguwen/llm_agent.md
+!data/baguwen/SOURCES.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# uv
+uv.lock
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,24 @@
+【职位】AI Agent 工程师
+
+【公司】字节跳动 · 大模型应用团队
+
+【工作职责】
+1. 负责设计并落地基于大语言模型（LLM）的 Agent 系统，包括多轮对话、工具调用、任务规划与执行闭环。
+2. 构建和优化 RAG（检索增强生成）管线，负责文档解析、分块策略、向量召回与 reranker 精排全链路。
+3. 使用 LangGraph、LangChain 等框架编排复杂 Agent 工作流，设计状态机与自修复重试机制。
+4. 对接 DeepSeek、OpenAI 等大模型 API，进行 Prompt Engineering 优化，提升输出质量和 JSON 结构化稳定性。
+5. 负责 Agent 系统的可观测性建设，接入 LangSmith 等链路追踪工具，分析各节点耗时与失败模式。
+6. 参与知识库管理模块开发，包括 Chroma、Milvus 等向量数据库的运维与性能调优。
+7. 与产品和业务团队协作，将 AI Agent 能力集成到具体业务场景，推动落地交付。
+
+【任职要求】
+1. 扎实的 Python 编程基础，熟悉异步编程（asyncio）、装饰器、生成器等特性。
+2. 熟悉大语言模型应用开发，了解 Transformer 架构原理，理解 Attention 机制与 RLHF 基础。
+3. 有 RAG 系统实际落地经验，了解 embedding、向量检索、reranker 工作原理。
+4. 熟悉 LangChain / LangGraph 或类似 Agent 编排框架，有图状态机编排经验者优先。
+5. 了解 Chroma、Faiss、Milvus 等向量数据库的基本使用，有持久化与性能优化经验。
+6. 具备良好的工程素养，代码可读性强，重视测试覆盖与系统可观测性。
+7. 有 Function Calling / Tool Use、ReAct、Plan-and-Execute 等 Agent 模式实践经验者优先。
+8. 熟悉 Linux 开发环境，有 Docker、K8s 基础者加分。
+
+【薪资范围】25K-45K，16 薪，base 北京

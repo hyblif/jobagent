@@ -15,6 +15,7 @@ runs/
 
 # Local agent memory
 AGENTS.md
+CODEX_WORKFLOW.md
 
 # Private corpus (commit only the sample files)
 data/baguwen/private/

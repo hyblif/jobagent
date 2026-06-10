@@ -1,16 +1,20 @@
 import os
 from functools import lru_cache
 
+import torch
+
 
 @lru_cache(maxsize=1)
 def _load_reranker():
-    from FlagEmbedding import FlagReranker
+    from sentence_transformers import CrossEncoder
 
     model_path = os.environ.get("RERANKER_MODEL_PATH") or os.environ.get(
         "RERANKER_MODEL_NAME", "BAAI/bge-reranker-v2-m3"
     )
-    use_fp16 = os.environ.get("RERANKER_FP16", "false").lower() == "true"
-    return FlagReranker(model_path, use_fp16=use_fp16)
+    return CrossEncoder(
+        model_path,
+        default_activation_function=torch.nn.Sigmoid(),
+    )
 
 
 def rerank(
@@ -24,9 +28,11 @@ def rerank(
 
     reranker = _load_reranker()
     pairs = [[query, c[text_key]] for c in candidates]
-    scores = reranker.compute_score(pairs, normalize=True)
+    scores = reranker.predict(pairs)
 
-    if not isinstance(scores, list):
+    if hasattr(scores, "tolist"):
+        scores = scores.tolist()
+    elif not isinstance(scores, list):
         scores = [scores]
 
     # annotate in place then sort

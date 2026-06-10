@@ -11,7 +11,7 @@ def get_llm(temperature: float = 0.2) -> ChatOpenAI:
             "DEEPSEEK_API_KEY is not set. Copy .env.example to .env and fill it in."
         )
     base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+    model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
     return ChatOpenAI(
         model=model,
         api_key=api_key,

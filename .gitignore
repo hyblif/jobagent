@@ -41,9 +41,6 @@ build/
 .coverage
 htmlcov/
 
-# uv
-uv.lock
-
 # macOS
 .DS_Store
 

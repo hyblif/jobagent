@@ -156,16 +156,18 @@ runs/demo/
 当前内置固定 eval 集：
 
 - 文件：`src/eval/eval_set.json`
-- 覆盖：RAG、Agent、数据库、网络、并发、系统设计、机器学习指标、Linux 排障等 12 个问题。
+- 覆盖：RAG、Agent、数据库、网络、并发、系统设计、机器学习指标、Linux 排障等共 20 个问题。
+- 其中 12 个为基础题，新增 8 个 `hard_*` 跨主题/换述干扰题：query 不含目标 heading 的关键词，且语料中存在“相似但错误”的兄弟 heading（如 `os.md / 内存管理` vs `python.md / 内存管理`、`system_design.md / 缓存与一致性` vs `database.md / Redis 与缓存`），用来逼出 reranker 相对纯向量召回的边际收益。
 - gold 标注：使用 `source + heading`，避免依赖 Chroma chunk id。
 
 运行方式：
 
 ```bash
+uv run python scripts/build_index.py --data-dir data/baguwen
 uv run python -m src.eval.retrieval_eval
 ```
 
-2026-06-14 基线结果：
+2026-06-14 基线（仅 12 基础题）：
 
 | mode | hit@3 | hit@5 | MRR |
 | --- | ---: | ---: | ---: |
@@ -174,8 +176,8 @@ uv run python -m src.eval.retrieval_eval
 
 解释：
 
-- 当前 12 题在纯向量召回下已经全部 top-1 命中，因此 reranker 没有体现可见指标提升。
-- 这说明当前样例语料和 eval set 偏容易；后续需要增加更难的换述题、干扰主题和参数扫描，才能更可靠地分析 reranker 的边际收益。
+- 12 道基础题在纯向量召回下即全部 top-1 命中，reranker 没有可见提升，说明该子集偏容易。
+- 为此新增了 8 道 `hard_*` 干扰题。这些题的指标需在本地（可访问 HuggingFace 下载 bge embedding/reranker）重新运行上面的命令后再回填，**本表暂未包含新题结果，待真实重跑后更新**（CI 离线环境无法下载模型，故不在 CI 中跑评测）。
 - eval 输出会写入 `runs/eval/{date}.json`，该目录默认不提交。
 
 ## 样例语料策略

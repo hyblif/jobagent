@@ -406,7 +406,7 @@ def validate_node(state: AgentState) -> dict:
 # Node 7: render_node
 # ---------------------------------------------------------------------------
 
-def _render_markdown(plan: PrepPlan, job, citations_map: dict) -> str:
+def _render_markdown(plan: PrepPlan, job) -> str:
     lines = [f"# {job.company} · {job.role} 面试备战计划\n"]
 
     def ref(source_ids):
@@ -494,8 +494,7 @@ def render_node(state: AgentState) -> dict:
 
     # Render and save Markdown
     if plan:
-        citations_map = {c.get("id"): c for c in plan.citations}
-        md = _render_markdown(plan, job, citations_map)
+        md = _render_markdown(plan, job)
     else:
         validation_errors = state.get("validation_errors", [])
         md = (

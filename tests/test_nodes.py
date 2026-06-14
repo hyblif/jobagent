@@ -5,7 +5,10 @@ import pytest
 
 from src.agent.nodes import (
     MAX_RETRIES,
+    plan_node,
     router_after_validate,
+    research_node,
+    retrieve_node,
     validate_node,
     rerank_node,
     intake_node,
@@ -18,7 +21,26 @@ from src.schemas.plan import Evidence, JobInput
 # ---------------------------------------------------------------------------
 
 def _make_job():
-    return JobInput(company="测试公司", role="测试岗位", jd_text="岗位描述内容")
+    return JobInput(company="测试公司", role="测试岗位", jd_text="需要 Python、RAG、LangGraph 和 Redis 经验")
+
+
+def _base_state(**overrides):
+    state = {
+        "job_input": _make_job(),
+        "search_queries": [],
+        "kb_query": "",
+        "web_evidences": [],
+        "kb_evidences": [],
+        "all_evidences": [],
+        "plan_json": None,
+        "plan": None,
+        "validation_errors": [],
+        "warnings": [],
+        "retry_count": 0,
+        "output_dir": "/tmp/test",
+    }
+    state.update(overrides)
+    return state
 
 
 def _make_evidences(n_web=2, n_kb=2) -> list[Evidence]:
@@ -56,16 +78,48 @@ def test_intake_node_fallback_on_llm_failure(monkeypatch):
 
     monkeypatch.setattr("src.agent.nodes.get_llm", _fail)
 
-    state = {
-        "job_input": _make_job(),
-        "search_queries": [],
-        "web_evidences": [], "kb_evidences": [], "all_evidences": [],
-        "plan_json": None, "plan": None, "validation_errors": [],
-        "retry_count": 0, "output_dir": "/tmp/test",
-    }
+    state = _base_state()
     result = intake_node(state)
     assert len(result["search_queries"]) == 4
     assert all("测试" in q or "岗位" in q for q in result["search_queries"])
+    assert result["kb_query"]
+    assert "Python" in result["kb_query"] or "python" in result["kb_query"].lower()
+    assert any("intake 降级为模板检索词" in w for w in result["warnings"])
+
+
+def test_research_node_warns_on_tavily_failure(monkeypatch):
+    """Tavily failure should be visible in workflow state."""
+    def _fail(*args, **kwargs):
+        raise RuntimeError("bad tavily key")
+
+    monkeypatch.setattr("src.agent.nodes.web_search", _fail)
+    result = research_node(_base_state(search_queries=["测试 查询"]))
+    assert result["web_evidences"] == []
+    assert any("Tavily 搜索失败" in w and "web 证据 0 条" in w for w in result["warnings"])
+
+
+def test_retrieve_node_warns_on_empty_kb(monkeypatch):
+    """Knowledge-base failures should be captured as warnings."""
+    def _fail(*args, **kwargs):
+        raise RuntimeError("知识库为空，建议先 build_index")
+
+    monkeypatch.setattr("src.agent.nodes.retrieve", _fail)
+    result = retrieve_node(_base_state(search_queries=["RAG 面试"]))
+    assert result["kb_evidences"] == []
+    assert any("知识库检索失败" in w and "build_index" in w for w in result["warnings"])
+
+
+def test_plan_node_warns_on_llm_failure(monkeypatch):
+    """LLM call failures should remain validation errors and warnings."""
+    class FailingLLM:
+        def invoke(self, messages):
+            raise RuntimeError("llm down")
+
+    monkeypatch.setattr("src.agent.nodes.get_llm", lambda temperature=0.2: FailingLLM())
+    result = plan_node(_base_state(all_evidences=[]))
+    assert result["plan_json"] is None
+    assert any("LLM 调用失败" in e for e in result["validation_errors"])
+    assert any("LLM 调用失败" in w for w in result["warnings"])
 
 
 # ---------------------------------------------------------------------------
@@ -74,13 +128,6 @@ def test_intake_node_fallback_on_llm_failure(monkeypatch):
 
 def test_rerank_node_assigns_stable_ids(monkeypatch):
     """rerank_node must assign web-N and kb-N ids."""
-    # Mock the reranker to just return candidates unchanged
-    monkeypatch.setattr(
-        "src.agent.nodes.rerank_node.__globals__['__builtins__']",
-        {},
-        raising=False,
-    )
-
     def _fake_rerank(query, candidates, text_key, top_k):
         return candidates[:top_k]
 
@@ -93,14 +140,13 @@ def test_rerank_node_assigns_stable_ids(monkeypatch):
     kb_raw = [
         {"id": "chroma-001", "source_type": "kb", "title": "KB1", "url_or_path": "os.md", "excerpt": "e3", "score": 0.7},
     ]
-    state = {
-        "job_input": _make_job(),
-        "search_queries": [], "plan_json": None, "plan": None,
-        "validation_errors": [], "retry_count": 0, "output_dir": "/tmp",
-        "web_evidences": web_raw,
-        "kb_evidences": kb_raw,
-        "all_evidences": [],
-    }
+    state = _base_state(
+        search_queries=[],
+        kb_query="测试岗位 Python RAG 面试 高频考点",
+        web_evidences=web_raw,
+        kb_evidences=kb_raw,
+        output_dir="/tmp",
+    )
 
     # Patch _rerank import inside rerank_node
     import src.agent.nodes as nodes_module
@@ -124,6 +170,26 @@ def test_rerank_node_assigns_stable_ids(monkeypatch):
     assert all_ids == {e.id for e in web_evs} | {e.id for e in kb_evs}
 
 
+def test_rerank_node_uses_kb_query(monkeypatch):
+    """rerank_node should pass the intake-generated kb_query to the CrossEncoder reranker."""
+    captured = {}
+
+    def _fake_rerank(query, candidates, text_key, top_k):
+        captured["query"] = query
+        return candidates[:top_k]
+
+    monkeypatch.setattr("src.rag.rerank.rerank", _fake_rerank, raising=False)
+    kb_raw = [
+        {"id": "chroma-001", "source_type": "kb", "title": "KB1", "url_or_path": "rag.md", "excerpt": "LangGraph RAG", "score": 0.7},
+    ]
+    state = _base_state(
+        kb_query="AI Agent LangGraph RAG Redis 面试 高频考点",
+        kb_evidences=kb_raw,
+    )
+    rerank_node(state)
+    assert captured["query"] == "AI Agent LangGraph RAG Redis 面试 高频考点"
+
+
 # ---------------------------------------------------------------------------
 # validate_node
 # ---------------------------------------------------------------------------
@@ -132,10 +198,10 @@ def test_validate_node_passes_valid_plan():
     evidences = _make_evidences(2, 2)
     state = {
         "job_input": _make_job(),
-        "search_queries": [], "web_evidences": [], "kb_evidences": [],
+        "search_queries": [], "kb_query": "", "web_evidences": [], "kb_evidences": [],
         "all_evidences": evidences,
         "plan_json": _valid_plan_json(evidences),
-        "plan": None, "validation_errors": [], "retry_count": 0, "output_dir": "/tmp",
+        "plan": None, "validation_errors": [], "warnings": [], "retry_count": 0, "output_dir": "/tmp",
     }
     result = validate_node(state)
     assert result["validation_errors"] == []
@@ -150,10 +216,10 @@ def test_validate_node_detects_unknown_source_id():
 
     state = {
         "job_input": _make_job(),
-        "search_queries": [], "web_evidences": [], "kb_evidences": [],
+        "search_queries": [], "kb_query": "", "web_evidences": [], "kb_evidences": [],
         "all_evidences": evidences,
         "plan_json": plan_json,
-        "plan": None, "validation_errors": [], "retry_count": 0, "output_dir": "/tmp",
+        "plan": None, "validation_errors": [], "warnings": [], "retry_count": 0, "output_dir": "/tmp",
     }
     result = validate_node(state)
     assert any("nonexistent-99" in e for e in result["validation_errors"])
@@ -167,10 +233,10 @@ def test_validate_node_increments_retry_count():
 
     state = {
         "job_input": _make_job(),
-        "search_queries": [], "web_evidences": [], "kb_evidences": [],
+        "search_queries": [], "kb_query": "", "web_evidences": [], "kb_evidences": [],
         "all_evidences": evidences,
         "plan_json": plan_json,
-        "plan": None, "validation_errors": [], "retry_count": 1, "output_dir": "/tmp",
+        "plan": None, "validation_errors": [], "warnings": [], "retry_count": 1, "output_dir": "/tmp",
     }
     result = validate_node(state)
     assert result["retry_count"] == 2
@@ -181,10 +247,10 @@ def test_validate_node_schema_error():
     # Missing required fields
     state = {
         "job_input": _make_job(),
-        "search_queries": [], "web_evidences": [], "kb_evidences": [],
+        "search_queries": [], "kb_query": "", "web_evidences": [], "kb_evidences": [],
         "all_evidences": evidences,
         "plan_json": {"interview_overview": []},  # missing 4 required fields
-        "plan": None, "validation_errors": [], "retry_count": 0, "output_dir": "/tmp",
+        "plan": None, "validation_errors": [], "warnings": [], "retry_count": 0, "output_dir": "/tmp",
     }
     result = validate_node(state)
     assert len(result["validation_errors"]) > 0

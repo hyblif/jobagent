@@ -14,30 +14,36 @@ def _client():
 def web_search(
     query: str,
     max_results: int = 5,
-    retries: int = 2,
+    retries: int = 1,
+    timeout: int = 15,
 ) -> list[dict]:
     """Search the web and return raw evidence dicts (id assigned later in rerank_node).
 
     Returns list of dicts: {source_type, title, url_or_path, excerpt, score}.
-    Always returns a list; never raises.
+    Raises on missing configuration or final search failure so workflow nodes can warn.
     """
     client = _client()
     if client is None:
-        return []
+        raise RuntimeError("TAVILY_API_KEY 未配置")
 
+    last_exc: Exception | None = None
     for attempt in range(retries + 1):
         try:
             resp = client.search(
                 query=query,
                 search_depth="advanced",
                 max_results=max_results,
+                timeout=timeout,
             )
             break
-        except Exception:
+        except Exception as exc:
+            last_exc = exc
             if attempt < retries:
                 time.sleep(2**attempt)
             else:
-                return []
+                raise RuntimeError(f"Tavily 搜索失败：{exc}") from exc
+    else:
+        raise RuntimeError(f"Tavily 搜索失败：{last_exc}")
 
     out = []
     for r in resp.get("results", []):

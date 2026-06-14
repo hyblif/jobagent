@@ -46,12 +46,14 @@ def run_workflow(job_input: JobInput, output_dir: str = "runs/output") -> dict:
     initial_state: AgentState = {
         "job_input": job_input,
         "search_queries": [],
+        "kb_query": "",
         "web_evidences": [],
         "kb_evidences": [],
         "all_evidences": [],
         "plan_json": None,
         "plan": None,
         "validation_errors": [],
+        "warnings": [],
         "retry_count": 0,
         "output_dir": output_dir,
     }

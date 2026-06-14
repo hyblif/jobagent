@@ -1,6 +1,5 @@
 """LangGraph node functions and routing logic for the jobagent workflow."""
 import json
-import os
 import re
 from pathlib import Path
 
@@ -19,6 +18,46 @@ MAX_RETRIES = 3
 MAX_WEB_EVIDENCES = 12
 MAX_KB_CANDIDATES = 6
 
+TECH_KEYWORDS = [
+    "agent",
+    "ai agent",
+    "llm",
+    "rag",
+    "embedding",
+    "reranker",
+    "langgraph",
+    "langchain",
+    "python",
+    "asyncio",
+    "fastapi",
+    "streamlit",
+    "mysql",
+    "redis",
+    "sql",
+    "http",
+    "https",
+    "tcp",
+    "dns",
+    "kafka",
+    "docker",
+    "kubernetes",
+    "linux",
+    "git",
+    "微调",
+    "向量",
+    "检索",
+    "重排",
+    "提示词",
+    "多智能体",
+    "工具调用",
+    "并发",
+    "协程",
+    "数据库",
+    "缓存",
+    "消息队列",
+    "限流",
+]
+
 
 def _load_system_prompt() -> str:
     return _PROMPT_PATH.read_text(encoding="utf-8")
@@ -35,6 +74,26 @@ def parse_json(content: str) -> dict | None:
         return None
 
 
+def _derive_kb_query(job, queries: list[str]) -> str:
+    text = " ".join([job.role, job.company, job.jd_text, *queries])
+    text_lower = text.lower()
+    terms: list[str] = []
+
+    for keyword in TECH_KEYWORDS:
+        if keyword.lower() in text_lower and keyword not in terms:
+            terms.append(keyword)
+
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9_+#.-]{1,30}", text):
+        normalized = token.strip(".,;:()[]{}")
+        if normalized and normalized.lower() not in {t.lower() for t in terms}:
+            terms.append(normalized)
+        if len(terms) >= 12:
+            break
+
+    technical_part = " ".join(terms[:12])
+    return f"{job.role} {technical_part} 面试 高频考点 八股".strip()
+
+
 # ---------------------------------------------------------------------------
 # Node 1: intake
 # ---------------------------------------------------------------------------
@@ -42,12 +101,14 @@ def parse_json(content: str) -> dict | None:
 def intake_node(state: AgentState) -> dict:
     job = state["job_input"]
     jd_snippet = job.jd_text[:2000]
+    warnings = list(state.get("warnings", []))
 
     system = (
         "你是面试调研助手。根据公司、岗位和 JD，生成 4 条用于联网搜索的中文检索词，"
+        "并生成 1 条用于本地知识库检索/重排的 kb_query。"
         "覆盖：(1) 公司+岗位面试流程/面经，(2) 岗位核心技术栈考点，"
         "(3) 公司近期业务/技术方向，(4) 该岗位常见八股题方向。"
-        '只输出 JSON：{"queries": ["...", "...", "...", "..."]}（json）。'
+        '只输出 JSON：{"queries": ["...", "...", "...", "..."], "kb_query": "..."}（json）。'
     )
     human = f"公司：{job.company}\n岗位：{job.role}\nJD：{jd_snippet}"
 
@@ -57,8 +118,12 @@ def intake_node(state: AgentState) -> dict:
         data = parse_json(resp.content)
         queries = data.get("queries", []) if data else []
         queries = [q for q in queries if isinstance(q, str)][:4]
-    except Exception:
+        kb_query = data.get("kb_query", "") if data else ""
+        kb_query = kb_query if isinstance(kb_query, str) else ""
+    except Exception as exc:
         queries = []
+        kb_query = ""
+        warnings.append(f"intake 降级为模板检索词：{type(exc).__name__}")
 
     if not queries:
         queries = [
@@ -67,8 +132,13 @@ def intake_node(state: AgentState) -> dict:
             f"{job.role} 高频考点",
             f"{job.role} 八股",
         ]
+        if not any("intake 降级为模板检索词" in w for w in warnings):
+            warnings.append("intake 降级为模板检索词：LLM 未返回有效 queries")
 
-    return {"search_queries": queries}
+    if not kb_query:
+        kb_query = _derive_kb_query(job, queries)
+
+    return {"search_queries": queries, "kb_query": kb_query, "warnings": warnings}
 
 
 # ---------------------------------------------------------------------------
@@ -77,11 +147,12 @@ def intake_node(state: AgentState) -> dict:
 
 def research_node(state: AgentState) -> dict:
     queries = state.get("search_queries", [])
+    warnings = list(state.get("warnings", []))
     seen_urls: set[str] = set()
     results: list[dict] = []
 
-    try:
-        for q in queries:
+    for q in queries:
+        try:
             for item in web_search(q, max_results=5):
                 url = item.get("url_or_path", "")
                 if url and url in seen_urls:
@@ -92,10 +163,13 @@ def research_node(state: AgentState) -> dict:
                     break
             if len(results) >= MAX_WEB_EVIDENCES:
                 break
-    except Exception:
-        pass
+        except Exception as exc:
+            warnings.append(
+                f"Tavily 搜索失败（{type(exc).__name__}）：{exc}；当前 web 证据 {len(results)} 条"
+            )
+            break
 
-    return {"web_evidences": results}
+    return {"web_evidences": results, "warnings": warnings}
 
 
 # ---------------------------------------------------------------------------
@@ -104,18 +178,30 @@ def research_node(state: AgentState) -> dict:
 
 def retrieve_node(state: AgentState) -> dict:
     queries = state.get("search_queries", [])
+    warnings = list(state.get("warnings", []))
     seen_ids: set[str] = set()
     candidates: list[dict] = []
 
     for q in queries:
-        for item in retrieve(q, n_candidates=20, top_k=5, use_rerank=False):
-            cid = item.get("id", "")
-            if cid in seen_ids:
-                continue
-            seen_ids.add(cid)
-            candidates.append(item)
+        try:
+            items = retrieve(
+                q,
+                n_candidates=20,
+                top_k=5,
+                use_rerank=False,
+                raise_on_error=True,
+            )
+            for item in items:
+                cid = item.get("id", "")
+                if cid in seen_ids:
+                    continue
+                seen_ids.add(cid)
+                candidates.append(item)
+        except Exception as exc:
+            warnings.append(f"知识库检索失败（{type(exc).__name__}）：{exc}")
+            break
 
-    return {"kb_evidences": candidates}
+    return {"kb_evidences": candidates, "warnings": warnings}
 
 
 # ---------------------------------------------------------------------------
@@ -126,11 +212,11 @@ def rerank_node(state: AgentState) -> dict:
     job = state["job_input"]
     raw_web: list[dict] = state.get("web_evidences", [])
     raw_kb: list[dict] = state.get("kb_evidences", [])
+    kb_query = state.get("kb_query") or _derive_kb_query(job, state.get("search_queries", []))
 
     # Rerank KB candidates against a composite query
     if raw_kb:
         from src.rag.rerank import rerank as _rerank
-        kb_query = f"{job.role} {job.company} 面试 高频考点"
         reranked_kb = _rerank(kb_query, raw_kb, text_key="excerpt", top_k=MAX_KB_CANDIDATES)
     else:
         reranked_kb = []
@@ -195,6 +281,7 @@ def plan_node(state: AgentState) -> dict:
     job = state["job_input"]
     all_evidences: list[Evidence] = state.get("all_evidences", [])
     validation_errors: list[str] = state.get("validation_errors", [])
+    warnings = list(state.get("warnings", []))
 
     system_prompt = _load_system_prompt()
     evidence_block = _build_evidence_block(all_evidences)
@@ -232,9 +319,11 @@ def plan_node(state: AgentState) -> dict:
             }
         return {"plan_json": plan_json, "validation_errors": []}
     except Exception as exc:
+        warnings.append(f"LLM 调用失败（{type(exc).__name__}）：{exc}")
         return {
             "plan_json": None,
             "validation_errors": [f"LLM 调用失败：{exc}"],
+            "warnings": warnings,
         }
 
 
@@ -386,6 +475,7 @@ def render_node(state: AgentState) -> dict:
     plan: PrepPlan | None = state.get("plan")
     plan_json = state.get("plan_json")
     all_evidences = state.get("all_evidences", [])
+    warnings = state.get("warnings", [])
     job = state["job_input"]
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -414,6 +504,14 @@ def render_node(state: AgentState) -> dict:
             "**校验错误**：\n"
             + "\n".join(f"- {e}" for e in validation_errors)
             + "\n\n请检查 `plan.json` 获取原始输出。\n"
+        )
+
+    if warnings:
+        warning_block = "\n".join(f"- {w}" for w in warnings)
+        md = md.replace(
+            "\n\n",
+            f"\n\n## 运行告警\n\n{warning_block}\n\n",
+            1,
         )
 
     (Path(output_dir) / "plan.md").write_text(md, encoding="utf-8")

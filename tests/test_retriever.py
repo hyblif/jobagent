@@ -65,6 +65,13 @@ def test_empty_collection_returns_empty(mock_embed, tmp_path):
     assert results == []
 
 
+def test_empty_collection_can_raise_for_workflow_warning(mock_embed, tmp_path):
+    from src.rag.retriever import KnowledgeBaseEmptyError, retrieve
+    get_collection(reset=True)
+    with pytest.raises(KnowledgeBaseEmptyError, match="知识库为空"):
+        retrieve("向量检索", n_candidates=5, top_k=3, use_rerank=False, raise_on_error=True)
+
+
 def test_retrieve_returns_candidates(populated_collection, monkeypatch):
     """Without rerank, retrieve should return top-k candidates."""
     # Patch reranker so it's never called
@@ -99,3 +106,12 @@ def test_retrieve_graceful_on_exception(monkeypatch):
     from src.rag.retriever import retrieve
     results = retrieve("query")
     assert results == []
+
+
+def test_retrieve_can_raise_on_exception(monkeypatch):
+    """Workflow mode can ask retrieve to expose collection errors."""
+    from src.rag import retriever as ret_module
+    monkeypatch.setattr(ret_module, "get_collection", lambda: (_ for _ in ()).throw(RuntimeError("db error")))
+    from src.rag.retriever import retrieve
+    with pytest.raises(RuntimeError, match="知识库连接失败"):
+        retrieve("query", raise_on_error=True)

@@ -39,10 +39,22 @@ if run_btn:
         with st.spinner("生成中，预计需要 1-3 分钟..."):
             final = run_workflow(job, out_dir.strip() or "runs/streamlit")
 
+        warnings = final.get("warnings", [])
+        web_count = len(final.get("web_evidences", []))
+        kb_count = len(final.get("kb_evidences", []))
+
+        if warnings:
+            st.warning("运行告警：\n" + "\n".join(f"- {w}" for w in warnings))
+
+        with st.sidebar:
+            st.subheader("证据计数")
+            st.metric("Web 证据", web_count)
+            st.metric("KB 证据", kb_count)
+
         if not final.get("plan"):
             errors = final.get("validation_errors", [])
             with col2:
-                st.error("生成失败 — 校验未通过")
+                st.error("生成失败 — 计划校验未通过，输出可能不完整")
                 for e in errors:
                     st.write(f"- {e}")
         else:

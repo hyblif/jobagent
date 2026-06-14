@@ -2,19 +2,28 @@ from src.rag.rerank import rerank
 from src.rag.store import get_collection
 
 
+class KnowledgeBaseEmptyError(RuntimeError):
+    """Raised when the vector store exists but has no indexed chunks."""
+
+
 def retrieve(
     query: str,
     n_candidates: int = 20,
     top_k: int = 5,
     use_rerank: bool = True,
+    raise_on_error: bool = False,
 ) -> list[dict]:
     """Returns candidate dicts: {id, source_type, title, url_or_path, excerpt, score}"""
     try:
         collection = get_collection()
-    except Exception:
+    except Exception as exc:
+        if raise_on_error:
+            raise RuntimeError(f"知识库连接失败：{exc}") from exc
         return []
 
     if collection.count() == 0:
+        if raise_on_error:
+            raise KnowledgeBaseEmptyError("知识库为空，建议先 build_index")
         return []
 
     n_results = min(n_candidates, collection.count())
@@ -24,7 +33,9 @@ def retrieve(
             n_results=n_results,
             include=["documents", "metadatas", "distances"],
         )
-    except Exception:
+    except Exception as exc:
+        if raise_on_error:
+            raise RuntimeError(f"知识库查询失败：{exc}") from exc
         return []
 
     docs = res["documents"][0]

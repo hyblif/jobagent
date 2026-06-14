@@ -56,12 +56,14 @@ def plan(company: str, role: str, jd_file: str | None, jd_text: str | None, out:
     initial_state = {
         "job_input": job,
         "search_queries": [],
+        "kb_query": "",
         "web_evidences": [],
         "kb_evidences": [],
         "all_evidences": [],
         "plan_json": None,
         "plan": None,
         "validation_errors": [],
+        "warnings": [],
         "retry_count": 0,
         "output_dir": out,
     }
@@ -85,6 +87,27 @@ def plan(company: str, role: str, jd_file: str | None, jd_text: str | None, out:
                 console.log(f"  [dim]✓[/dim] {node_name} — {label}")
                 if node_output is not None:
                     final_state.update(node_output)
+
+    web_count = len(final_state.get("web_evidences", []))
+    kb_count = len(final_state.get("kb_evidences", []))
+    warnings = final_state.get("warnings", [])
+
+    counts = Table(title="证据计数", show_header=True, header_style="bold cyan")
+    counts.add_column("来源", style="dim")
+    counts.add_column("数量", justify="right")
+    counts.add_row("web", str(web_count))
+    counts.add_row("kb", str(kb_count))
+    console.print(counts)
+
+    if warnings:
+        console.print(
+            Panel(
+                "\n".join(f"• {w}" for w in warnings),
+                title="运行告警",
+                style="yellow",
+                expand=False,
+            )
+        )
 
     if not final_state.get("plan"):
         errors = final_state.get("validation_errors", [])

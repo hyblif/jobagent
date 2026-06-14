@@ -148,14 +148,6 @@ def test_rerank_node_assigns_stable_ids(monkeypatch):
         output_dir="/tmp",
     )
 
-    # Patch _rerank import inside rerank_node
-    import src.agent.nodes as nodes_module
-
-    def _mock_rerank(query, candidates, text_key, top_k):
-        return candidates[:top_k]
-
-    monkeypatch.setattr(nodes_module, "_import_rerank", None, raising=False)
-
     result = rerank_node(state)
     web_evs = result["web_evidences"]
     kb_evs = result["kb_evidences"]

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Fixed retrieval eval set for the 2026-06-14 162-chunk corpus.",
+  "description": "Fixed retrieval eval set for the 2026-06-14 162-chunk corpus. Includes a cross-topic/distractor block to expose reranker benefit over pure vector recall.",
   "cases": [
     {
       "id": "rag_flow_modules",
@@ -143,6 +143,94 @@
         {
           "source": "git_linux.md",
           "heading": "运行与排障"
+        }
+      ]
+    },
+    {
+      "id": "hard_gil_cpu_bound",
+      "kind": "paraphrase",
+      "query": "用多线程跑纯计算任务为什么几乎没有加速？",
+      "gold": [
+        {
+          "source": "python.md",
+          "heading": "并发与 GIL"
+        }
+      ]
+    },
+    {
+      "id": "hard_coroutine_io_efficiency",
+      "kind": "paraphrase",
+      "query": "面对大量网络等待时，协程相比多线程为什么更省资源？",
+      "gold": [
+        {
+          "source": "concurrency.md",
+          "heading": "异步与事件循环"
+        }
+      ]
+    },
+    {
+      "id": "hard_cache_db_consistency",
+      "kind": "paraphrase",
+      "query": "更新数据库之后怎样避免缓存里继续读到旧数据？",
+      "gold": [
+        {
+          "source": "system_design.md",
+          "heading": "缓存与一致性"
+        }
+      ]
+    },
+    {
+      "id": "hard_os_virtual_memory_paging",
+      "kind": "paraphrase",
+      "query": "操作系统层面的虚拟内存和分页换页机制是怎么工作的？",
+      "gold": [
+        {
+          "source": "os.md",
+          "heading": "内存管理"
+        }
+      ]
+    },
+    {
+      "id": "hard_epoll_vs_select",
+      "kind": "paraphrase",
+      "query": "高并发服务器用 epoll 比 select 强在哪里？",
+      "gold": [
+        {
+          "source": "os.md",
+          "heading": "I/O 模型"
+        }
+      ]
+    },
+    {
+      "id": "hard_rag_retrieval_pipeline",
+      "kind": "paraphrase",
+      "query": "把内部文档接入大模型问答，检索这一侧的工程链路要怎么搭？",
+      "gold": [
+        {
+          "source": "llm_rag.md",
+          "heading": "RAG 流程"
+        }
+      ]
+    },
+    {
+      "id": "hard_embedding_model_choice",
+      "kind": "paraphrase",
+      "query": "中文检索场景里挑选 embedding 模型、评估召回质量要注意什么？",
+      "gold": [
+        {
+          "source": "llm_rag.md",
+          "heading": "Embedding 与 Reranker"
+        }
+      ]
+    },
+    {
+      "id": "hard_circuit_breaker_cascade",
+      "kind": "paraphrase",
+      "query": "下游依赖变慢时，怎么靠熔断和降级避免整条链路被拖垮？",
+      "gold": [
+        {
+          "source": "system_design.md",
+          "heading": "限流、降级与熔断"
         }
       ]
     }

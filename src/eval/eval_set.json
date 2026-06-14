@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "description": "Fixed retrieval eval set for the 2026-06-14 162-chunk corpus.",
+  "cases": [
+    {
+      "id": "rag_flow_modules",
+      "kind": "direct",
+      "query": "一个完整 RAG 系统包含哪些模块？",
+      "gold": [
+        {
+          "source": "llm_rag.md",
+          "heading": "RAG 流程"
+        },
+        {
+          "source": "llm_agent.md",
+          "heading": "RAG 系统"
+        }
+      ]
+    },
+    {
+      "id": "qa_chunking_strategy",
+      "kind": "paraphrase",
+      "query": "Q&A 型面试语料为什么适合按问题切 chunk？",
+      "gold": [
+        {
+          "source": "llm_rag.md",
+          "heading": "切块与索引"
+        }
+      ]
+    },
+    {
+      "id": "cross_encoder_reranker",
+      "kind": "direct",
+      "query": "为什么 RAG 里需要 CrossEncoder reranker？",
+      "gold": [
+        {
+          "source": "llm_rag.md",
+          "heading": "Embedding 与 Reranker"
+        },
+        {
+          "source": "llm_agent.md",
+          "heading": "RAG 系统"
+        }
+      ]
+    },
+    {
+      "id": "langgraph_state_machine",
+      "kind": "paraphrase",
+      "query": "LangGraph 状态机编排相比纯函数链有什么工程优势？",
+      "gold": [
+        {
+          "source": "llm_agent.md",
+          "heading": "Agent 系统"
+        }
+      ]
+    },
+    {
+      "id": "mysql_leftmost_prefix",
+      "kind": "direct",
+      "query": "联合索引的最左前缀原则是什么？",
+      "gold": [
+        {
+          "source": "database.md",
+          "heading": "MySQL 索引"
+        }
+      ]
+    },
+    {
+      "id": "redis_cache_failures",
+      "kind": "direct",
+      "query": "缓存穿透、击穿、雪崩分别是什么，常见处理方式有哪些？",
+      "gold": [
+        {
+          "source": "database.md",
+          "heading": "Redis 与缓存"
+        }
+      ]
+    },
+    {
+      "id": "http_versions",
+      "kind": "direct",
+      "query": "HTTP/1.1、HTTP/2、HTTP/3 的主要差异是什么？",
+      "gold": [
+        {
+          "source": "network.md",
+          "heading": "HTTP 与 HTTPS"
+        }
+      ]
+    },
+    {
+      "id": "intermittent_timeout",
+      "kind": "paraphrase",
+      "query": "线上接口偶发超时应该从 DNS、连接、服务端和依赖等哪些层次排查？",
+      "gold": [
+        {
+          "source": "network.md",
+          "heading": "性能与排障"
+        }
+      ]
+    },
+    {
+      "id": "async_blocking_call",
+      "kind": "paraphrase",
+      "query": "async 函数里调用阻塞函数会造成什么问题？",
+      "gold": [
+        {
+          "source": "concurrency.md",
+          "heading": "异步与事件循环"
+        },
+        {
+          "source": "python.md",
+          "heading": "并发与 GIL"
+        }
+      ]
+    },
+    {
+      "id": "retry_storm",
+      "kind": "paraphrase",
+      "query": "怎么防止客户端重试把短暂故障放大成 retry storm？",
+      "gold": [
+        {
+          "source": "system_design.md",
+          "heading": "限流、降级与熔断"
+        }
+      ]
+    },
+    {
+      "id": "classification_metrics",
+      "kind": "direct",
+      "query": "准确率、精确率、召回率、F1 有什么区别？",
+      "gold": [
+        {
+          "source": "ml_basics.md",
+          "heading": "指标与评估"
+        }
+      ]
+    },
+    {
+      "id": "linux_memory_leak",
+      "kind": "paraphrase",
+      "query": "Linux 服务 RSS 持续上涨时如何定位内存泄漏？",
+      "gold": [
+        {
+          "source": "git_linux.md",
+          "heading": "运行与排障"
+        }
+      ]
+    }
+  ]
+}

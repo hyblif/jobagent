@@ -51,6 +51,9 @@ def retrieve(
                 "source_type": "kb",
                 "title": meta.get("title") or meta.get("source", "knowledge base"),
                 "url_or_path": meta.get("source", ""),
+                "source": meta.get("source", ""),
+                "heading": meta.get("heading", ""),
+                "chunk_type": meta.get("chunk_type", ""),
                 "excerpt": doc,
                 "score": 1.0 - float(dist),  # cosine sim fallback
             }

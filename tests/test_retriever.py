@@ -82,6 +82,8 @@ def test_retrieve_returns_candidates(populated_collection, monkeypatch):
     for r in results:
         assert "excerpt" in r
         assert r["source_type"] == "kb"
+        assert r["source"] == "test.md"
+        assert r["heading"] == "基础"
 
 
 def test_retrieve_with_rerank(populated_collection, monkeypatch):

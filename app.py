@@ -62,36 +62,41 @@ def _run_workflow_with_progress(job: JobInput, output_dir: str) -> dict:
 
     progress = st.progress(0, text="准备启动 workflow")
     with st.status("准备启动 workflow", expanded=True) as status:
-        completed_nodes: set[str] = set()
-        for event in graph.stream(
-            state,
-            config={"recursion_limit": 25},
-            stream_mode="updates",
-        ):
-            for node_name, update in event.items():
-                if update:
-                    state.update(update)
+        try:
+            completed_nodes: set[str] = set()
+            for event in graph.stream(
+                state,
+                config={"recursion_limit": 25},
+                stream_mode="updates",
+            ):
+                for node_name, update in event.items():
+                    if update:
+                        state.update(update)
 
-                completed_nodes.add(node_name)
-                step_no = STEP_INDEX.get(node_name, len(completed_nodes))
-                total_steps = len(WORKFLOW_STEPS)
-                label = STEP_LABELS.get(node_name, node_name)
-                retry_count = state.get("retry_count", 0)
-                retry_suffix = (
-                    f"（第 {retry_count + 1} 次生成尝试）"
-                    if node_name == "generate" and retry_count
-                    else ""
-                )
+                    completed_nodes.add(node_name)
+                    step_no = STEP_INDEX.get(node_name, len(completed_nodes))
+                    total_steps = len(WORKFLOW_STEPS)
+                    label = STEP_LABELS.get(node_name, node_name)
+                    retry_count = state.get("retry_count", 0)
+                    retry_suffix = (
+                        f"（第 {retry_count + 1} 次生成尝试）"
+                        if node_name == "generate" and retry_count
+                        else ""
+                    )
 
-                progress.progress(
-                    min(step_no / total_steps, 1.0),
-                    text=f"{step_no}/{total_steps} {label}",
-                )
-                status.write(f"完成：{label}{retry_suffix}")
-                status.update(label=f"已完成：{label}", state="running")
+                    progress.progress(
+                        min(step_no / total_steps, 1.0),
+                        text=f"{step_no}/{total_steps} {label}",
+                    )
+                    status.write(f"完成：{label}{retry_suffix}")
+                    status.update(label=f"已完成：{label}", state="running")
 
-        progress.progress(1.0, text="7/7 workflow 完成")
-        status.update(label="workflow 完成", state="complete", expanded=False)
+            progress.progress(1.0, text=f"{len(WORKFLOW_STEPS)}/{len(WORKFLOW_STEPS)} workflow 完成")
+            status.update(label="workflow 完成", state="complete", expanded=False)
+        except Exception as exc:
+            progress.empty()
+            status.update(label=f"出错：{exc}", state="error", expanded=True)
+            raise
 
     return state
 
@@ -150,7 +155,8 @@ def _read_output_file(path: Path) -> str | None:
     return path.read_text(encoding="utf-8")
 
 
-def _render_output_downloads(output_dir: str) -> None:
+def _render_output_downloads(output_dir: str) -> str | None:
+    """Render download buttons; returns plan.md content so callers can reuse it."""
     output_path = Path(output_dir)
     plan_md = _read_output_file(output_path / "plan.md")
     plan_json = _read_output_file(output_path / "plan.json")
@@ -197,17 +203,19 @@ def _render_output_downloads(output_dir: str) -> None:
     ]
     if missing:
         st.caption("尚未生成：" + "、".join(missing))
+    return plan_md
 
 
 def _render_plan_summary(plan) -> None:
     if not plan:
         return
-    metric_cols = st.columns(5)
+    metric_cols = st.columns(6)
     metric_cols[0].metric("流程", len(plan.interview_overview))
     metric_cols[1].metric("方向", len(plan.focus_areas))
     metric_cols[2].metric("考点", len(plan.high_frequency_topics))
     metric_cols[3].metric("Q&A", len(plan.q_and_a))
-    metric_cols[4].metric("引用", len(plan.citations))
+    metric_cols[4].metric("行动计划", len(plan.action_plan))
+    metric_cols[5].metric("引用", len(plan.citations))
 
 
 def _render_run_alerts(final: dict) -> None:
@@ -224,7 +232,6 @@ def _render_run_alerts(final: dict) -> None:
         st.warning("运行告警：\n" + "\n".join(f"- {w}" for w in warnings))
 
     if validation_errors and not final.get("plan"):
-        st.error("计划校验未通过，已保存可用的中间产物。")
         with st.expander("校验错误详情", expanded=True):
             for error in validation_errors:
                 st.write(f"- {error}")
@@ -294,8 +301,6 @@ if run_btn:
         with st.sidebar:
             _render_evidence_panel(web_evidences, kb_evidences)
 
-        plan_md_path = Path(output_dir) / "plan.md"
-
         if not final.get("plan"):
             with col2:
                 st.error("生成失败：计划校验未通过。")
@@ -305,9 +310,8 @@ if run_btn:
             with col2:
                 st.success("生成完成！")
                 _render_plan_summary(final["plan"])
-                _render_output_downloads(output_dir)
+                md_content = _render_output_downloads(output_dir)
 
-                if plan_md_path.exists():
-                    md_content = plan_md_path.read_text(encoding="utf-8")
+                if md_content:
                     st.subheader("计划预览")
                     st.markdown(md_content)

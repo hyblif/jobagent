@@ -13,28 +13,22 @@ from dotenv import load_dotenv
 
 from src.schemas.plan import JobInput, PrepPlan
 
-
-def _load_live_env() -> None:
-    load_dotenv()
-
-
-def _missing_live_env() -> list[str]:
-    required = ["DEEPSEEK_API_KEY", "TAVILY_API_KEY"]
-    return [name for name in required if not os.environ.get(name)]
+_REPO_ROOT = Path(__file__).parent.parent
 
 
 @pytest.mark.live
 def test_live_workflow_smoke(monkeypatch, tmp_path):
-    _load_live_env()
-
     if os.environ.get("RUN_LIVE_TESTS") != "1":
         pytest.skip("Set RUN_LIVE_TESTS=1 to run the live smoke test.")
 
-    missing = _missing_live_env()
+    # no_network autouse fixture deletes keys from the environment; restore from .env
+    load_dotenv(override=True)
+
+    missing = [k for k in ("DEEPSEEK_API_KEY", "TAVILY_API_KEY") if not os.environ.get(k)]
     if missing:
         pytest.skip(f"Missing live API configuration: {', '.join(missing)}")
 
-    persist_dir = Path(".chroma/jobagent")
+    persist_dir = _REPO_ROOT / ".chroma/jobagent"
     if not persist_dir.exists():
         pytest.skip(
             "Missing .chroma/jobagent; build it with "
@@ -43,13 +37,15 @@ def test_live_workflow_smoke(monkeypatch, tmp_path):
         )
 
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(persist_dir))
+    from src.llm import get_llm
     from src.rag import store
 
     store.get_client.cache_clear()
+    get_llm.cache_clear()
 
     from src.agent.graph import run_workflow
 
-    jd_text = Path("examples/jd_agent_engineer.txt").read_text(encoding="utf-8")
+    jd_text = (_REPO_ROOT / "examples/jd_agent_engineer.txt").read_text(encoding="utf-8")
     job = JobInput(company="阿里巴巴", role="Agent 工程师", jd_text=jd_text)
     output_dir = tmp_path / "live_smoke"
 

@@ -165,19 +165,31 @@ runs/demo/
 ```bash
 uv run python scripts/build_index.py --data-dir data/baguwen
 uv run python -m src.eval.retrieval_eval
+uv run python -m src.eval.retrieval_eval --scan --out runs/eval/2026-06-17-scan.json
 ```
 
-2026-06-14 基线（仅 12 基础题）：
+2026-06-17 基线（20 题，`top_k=5`，`n_candidates=20`，不加查询前缀）：
 
 | mode | hit@3 | hit@5 | MRR |
 | --- | ---: | ---: | ---: |
-| no_rerank | 1.000 | 1.000 | 1.000 |
-| rerank | 1.000 | 1.000 | 1.000 |
+| no_rerank | 0.900 | 0.900 | 0.842 |
+| rerank | 0.950 | 0.950 | 0.925 |
+
+2026-06-15 参数扫描结论：
+
+| n_candidates | top_k | query prefix | rerank hit@3 | rerank hit@5 | rerank MRR |
+| ---: | ---: | --- | ---: | ---: | ---: |
+| 10 | 3 | no | 0.950 | 0.950 | 0.925 |
+| 20 | 5 | no | 0.950 | 0.950 | 0.925 |
+| 30 | 5 | no | 0.950 | 0.950 | 0.917 |
+| 20 | 5 | yes | 0.950 | 0.950 | 0.917 |
 
 解释：
 
-- 12 道基础题在纯向量召回下即全部 top-1 命中，reranker 没有可见提升，说明该子集偏容易。
-- 为此新增了 8 道 `hard_*` 干扰题。这些题的指标需在本地（可访问 HuggingFace 下载 bge embedding/reranker）重新运行上面的命令后再回填，**本表暂未包含新题结果，待真实重跑后更新**（CI 离线环境无法下载模型，故不在 CI 中跑评测）。
+- 12 道基础题在纯向量召回下仍全部 top-1 命中；新增的 8 道 `hard_*` 题让 reranker 的边际收益可见。
+- 代表例：`hard_rag_retrieval_pipeline` 在 no-rerank 下未进入 top-5，rerank 后命中 rank 2，说明 CrossEncoder 对换述后的 RAG 流程问题有帮助。
+- 当前局限：`hard_coroutine_io_efficiency` 在两种模式下都未命中，说明语料覆盖和 hard case 标注还要继续打磨。
+- 参数上暂时保留 `n_candidates=20`、`top_k=5`、不加 BGE 查询前缀：`n_candidates=30` 没有带来收益，查询前缀也没有稳定提升。
 - eval 输出会写入 `runs/eval/{date}.json`，该目录默认不提交。
 
 ## 样例语料策略
@@ -213,9 +225,9 @@ uv run pytest
 
 当前验证基线：
 
-- `uv run pytest` -> 40 passed。
+- `uv run pytest` -> 42 passed。
 - `uv run python scripts/build_index.py --data-dir data/baguwen --persist-dir .chroma/jobagent` -> 162 chunks indexed。
-- `uv run python -m src.eval.retrieval_eval` -> 12 cases completed。
+- `uv run python -m src.eval.retrieval_eval` -> 20 cases completed，rerank hit@3 0.950 / hit@5 0.950 / MRR 0.925。
 
 ## 主要目录
 
@@ -238,7 +250,7 @@ jobagent/
 
 ## 已知限制
 
-- 当前 eval set 已经饱和，不能单独证明 reranker 的实际收益。
+- 当前 eval set 仍较小，只能作为本地检索回归与参数对比基线，不宜过度泛化。
 - README 记录的是本地 MVP，不包含部署、登录、多用户、数据库后台等生产能力。
 - Tavily 只使用摘要搜索结果，没有抓取完整网页正文。
 - Streamlit UI 仍以 demo 为主，视觉和交互还有打磨空间。
@@ -248,8 +260,6 @@ jobagent/
 
 近期重点：
 
-- 扫描 `n_candidates` / `top_k` / 查询前缀等检索参数。
-- 补充更难的 eval case，并把评测分析写得更可信。
 - 验证 LangSmith trace 和 live smoke。
 - 打磨 Streamlit UI 和 README 展示材料。
 - 后续视进度加入模拟面试闭环。

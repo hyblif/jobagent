@@ -236,6 +236,8 @@ def main() -> None:
     args = parse_args()
     cases = load_eval_set(args.eval_set)
     query_prefix = BGE_QUERY_PREFIX if args.bge_query_prefix else args.query_prefix
+    if args.scan and query_prefix:
+        Console().print("[yellow]Warning: --query-prefix/--bge-query-prefix is ignored when --scan is active (scan always runs both prefix variants).[/yellow]")
     payload = (
         {"scan": scan_parameters(cases)}
         if args.scan
@@ -250,7 +252,7 @@ def main() -> None:
         "config": {
             "top_k": args.top_k,
             "n_candidates": args.n_candidates,
-            "query_prefix": bool(query_prefix),
+            "query_prefix": query_prefix or None,
             "scan": args.scan,
             "case_count": len(cases),
         },

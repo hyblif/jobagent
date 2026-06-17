@@ -44,3 +44,6 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "live: tests that call real external services and require RUN_LIVE_TESTS=1",
+]

@@ -1,4 +1,5 @@
 """Streamlit UI for jobagent."""
+import json
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -22,6 +23,18 @@ WORKFLOW_STEPS = [
 
 STEP_LABELS = dict(WORKFLOW_STEPS)
 STEP_INDEX = {node: index for index, (node, _) in enumerate(WORKFLOW_STEPS, start=1)}
+SAMPLE_JD_PATH = Path("examples/jd_agent_engineer.txt")
+
+
+def _load_sample_jd() -> str:
+    return SAMPLE_JD_PATH.read_text(encoding="utf-8")
+
+
+def _apply_sample_input() -> None:
+    st.session_state["company"] = "字节跳动"
+    st.session_state["role"] = "AI Agent 工程师"
+    st.session_state["jd"] = _load_sample_jd()
+    st.session_state["out_dir"] = "runs/streamlit"
 
 
 def _initial_state(job_input: JobInput, output_dir: str) -> AgentState:
@@ -131,22 +144,135 @@ def _render_evidence_panel(web_evidences: list[Evidence], kb_evidences: list[Evi
         _render_evidence_items(kb_evidences, "暂无 KB 证据")
 
 
+def _read_output_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _render_output_downloads(output_dir: str) -> None:
+    output_path = Path(output_dir)
+    plan_md = _read_output_file(output_path / "plan.md")
+    plan_json = _read_output_file(output_path / "plan.json")
+    evidence_json = _read_output_file(output_path / "evidence.json")
+
+    st.subheader("下载结果")
+    download_cols = st.columns(3)
+    with download_cols[0]:
+        st.download_button(
+            "下载 plan.md",
+            plan_md or "",
+            file_name="plan.md",
+            mime="text/markdown",
+            disabled=plan_md is None,
+            use_container_width=True,
+        )
+    with download_cols[1]:
+        st.download_button(
+            "下载 plan.json",
+            plan_json or "",
+            file_name="plan.json",
+            mime="application/json",
+            disabled=plan_json is None,
+            use_container_width=True,
+        )
+    with download_cols[2]:
+        st.download_button(
+            "下载 evidence.json",
+            evidence_json or "",
+            file_name="evidence.json",
+            mime="application/json",
+            disabled=evidence_json is None,
+            use_container_width=True,
+        )
+
+    missing = [
+        name
+        for name, content in {
+            "plan.md": plan_md,
+            "plan.json": plan_json,
+            "evidence.json": evidence_json,
+        }.items()
+        if content is None
+    ]
+    if missing:
+        st.caption("尚未生成：" + "、".join(missing))
+
+
+def _render_plan_summary(plan) -> None:
+    if not plan:
+        return
+    metric_cols = st.columns(5)
+    metric_cols[0].metric("流程", len(plan.interview_overview))
+    metric_cols[1].metric("方向", len(plan.focus_areas))
+    metric_cols[2].metric("考点", len(plan.high_frequency_topics))
+    metric_cols[3].metric("Q&A", len(plan.q_and_a))
+    metric_cols[4].metric("引用", len(plan.citations))
+
+
+def _render_run_alerts(final: dict) -> None:
+    warnings = final.get("warnings", [])
+    validation_errors = final.get("validation_errors", [])
+    web_count = len(final.get("web_evidences", []))
+    kb_count = len(final.get("kb_evidences", []))
+
+    count_cols = st.columns(2)
+    count_cols[0].metric("Web 证据", web_count)
+    count_cols[1].metric("KB 证据", kb_count)
+
+    if warnings:
+        st.warning("运行告警：\n" + "\n".join(f"- {w}" for w in warnings))
+
+    if validation_errors and not final.get("plan"):
+        st.error("计划校验未通过，已保存可用的中间产物。")
+        with st.expander("校验错误详情", expanded=True):
+            for error in validation_errors:
+                st.write(f"- {error}")
+
+
+def _render_debug_state(final: dict) -> None:
+    with st.expander("运行状态 JSON", expanded=False):
+        safe_state = {
+            "search_queries": final.get("search_queries", []),
+            "kb_query": final.get("kb_query", ""),
+            "warnings": final.get("warnings", []),
+            "validation_errors": final.get("validation_errors", []),
+            "retry_count": final.get("retry_count", 0),
+            "web_evidence_count": len(final.get("web_evidences", [])),
+            "kb_evidence_count": len(final.get("kb_evidences", [])),
+        }
+        st.code(json.dumps(safe_state, ensure_ascii=False, indent=2), language="json")
+
+
 st.set_page_config(page_title="jobagent · 面试备战计划", layout="wide")
 st.title("jobagent · AI 面试备战计划生成器")
+
+if "out_dir" not in st.session_state:
+    st.session_state["out_dir"] = "runs/streamlit"
 
 col1, col2 = st.columns([1, 2])
 
 with col1:
     st.subheader("输入信息")
-    company = st.text_input("目标公司", placeholder="例：字节跳动")
-    role = st.text_input("目标岗位", placeholder="例：AI Agent 工程师")
-    jd = st.text_area("JD 文本", height=300, placeholder="将职位描述粘贴到此处...")
-    out_dir = st.text_input("输出目录", value="runs/streamlit", help="生成的 plan.json/plan.md 保存路径")
+    if st.button("填充示例 JD", use_container_width=True):
+        _apply_sample_input()
+    company = st.text_input("目标公司", key="company", placeholder="例：字节跳动")
+    role = st.text_input("目标岗位", key="role", placeholder="例：AI Agent 工程师")
+    jd = st.text_area(
+        "JD 文本",
+        key="jd",
+        height=300,
+        placeholder="将职位描述粘贴到此处...",
+    )
+    out_dir = st.text_input(
+        "输出目录",
+        key="out_dir",
+        help="生成的 plan.json/plan.md/evidence.json 保存路径",
+    )
     run_btn = st.button("生成备战计划", type="primary", use_container_width=True)
 
 with col2:
     st.subheader("生成结果")
-    result_placeholder = st.empty()
 
 if run_btn:
     output_dir = out_dir.strip() or "runs/streamlit"
@@ -160,46 +286,28 @@ if run_btn:
         job = JobInput(company=company.strip(), role=role.strip(), jd_text=jd.strip())
         final = _run_workflow_with_progress(job, output_dir)
 
-        warnings = final.get("warnings", [])
         web_evidences = final.get("web_evidences", [])
         kb_evidences = final.get("kb_evidences", [])
 
-        if warnings:
-            st.warning("运行告警：\n" + "\n".join(f"- {w}" for w in warnings))
+        _render_run_alerts(final)
 
         with st.sidebar:
             _render_evidence_panel(web_evidences, kb_evidences)
 
-        if not final.get("plan"):
-            errors = final.get("validation_errors", [])
-            with col2:
-                st.error("生成失败 — 计划校验未通过，输出可能不完整")
-                for e in errors:
-                    st.write(f"- {e}")
-        else:
-            plan_md_path = Path(output_dir) / "plan.md"
-            plan_json_path = Path(output_dir) / "plan.json"
+        plan_md_path = Path(output_dir) / "plan.md"
 
+        if not final.get("plan"):
+            with col2:
+                st.error("生成失败：计划校验未通过。")
+                _render_output_downloads(output_dir)
+                _render_debug_state(final)
+        else:
             with col2:
                 st.success("生成完成！")
+                _render_plan_summary(final["plan"])
+                _render_output_downloads(output_dir)
 
                 if plan_md_path.exists():
                     md_content = plan_md_path.read_text(encoding="utf-8")
+                    st.subheader("计划预览")
                     st.markdown(md_content)
-
-                    dl_col1, dl_col2 = st.columns(2)
-                    with dl_col1:
-                        st.download_button(
-                            "⬇ 下载 plan.md",
-                            md_content,
-                            file_name="plan.md",
-                            mime="text/markdown",
-                        )
-                    with dl_col2:
-                        if plan_json_path.exists():
-                            st.download_button(
-                                "⬇ 下载 plan.json",
-                                plan_json_path.read_text(encoding="utf-8"),
-                                file_name="plan.json",
-                                mime="application/json",
-                            )

@@ -16,6 +16,9 @@ from src.rag.retriever import retrieve
 DEFAULT_EVAL_SET = Path(__file__).with_name("eval_set.json")
 DEFAULT_TOP_K = 5
 DEFAULT_N_CANDIDATES = 20
+BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
+SCAN_N_CANDIDATES = (10, 20, 30)
+SCAN_TOP_K = (3, 5, 8)
 
 
 def load_eval_set(path: Path = DEFAULT_EVAL_SET) -> list[dict[str, Any]]:
@@ -74,6 +77,7 @@ def evaluate(
     *,
     n_candidates: int = DEFAULT_N_CANDIDATES,
     top_k: int = DEFAULT_TOP_K,
+    query_prefix: str = "",
 ) -> dict[str, Any]:
     modes = {
         "no_rerank": False,
@@ -90,9 +94,10 @@ def evaluate(
             "gold": case["gold"],
             "modes": {},
         }
+        query = f"{query_prefix}{case['query']}" if query_prefix else case["query"]
         for mode_name, use_rerank in modes.items():
             results = retrieve(
-                case["query"],
+                query,
                 n_candidates=n_candidates,
                 top_k=top_k,
                 use_rerank=use_rerank,
@@ -110,6 +115,63 @@ def evaluate(
         "summary": {mode_name: summarize(scores) for mode_name, scores in scores_by_mode.items()},
         "cases": per_case,
     }
+
+
+def scan_parameters(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Run the small 2026-06-15 retrieval grid."""
+    from src.rag.rerank import rerank
+
+    runs = []
+    max_candidates = max(SCAN_N_CANDIDATES)
+    cached_cases: dict[bool, list[dict[str, Any]]] = {False: [], True: []}
+
+    for use_query_prefix in (False, True):
+        query_prefix = BGE_QUERY_PREFIX if use_query_prefix else ""
+        for case in cases:
+            query = f"{query_prefix}{case['query']}" if query_prefix else case["query"]
+            vector_results = retrieve(
+                query,
+                n_candidates=max_candidates,
+                top_k=max_candidates,
+                use_rerank=False,
+                raise_on_error=True,
+            )
+            reranked_results = rerank(query, vector_results, text_key="excerpt", top_k=max_candidates)
+            cached_cases[use_query_prefix].append(
+                {
+                    "gold": case["gold"],
+                    "vector_results": vector_results,
+                    "reranked_results": reranked_results,
+                }
+            )
+
+    for n_candidates in SCAN_N_CANDIDATES:
+        for top_k in SCAN_TOP_K:
+            for use_query_prefix in (False, True):
+                no_rerank_scores = []
+                rerank_scores = []
+                for case_record in cached_cases[use_query_prefix]:
+                    vector_subset = case_record["vector_results"][:n_candidates]
+                    vector_ids = {item["id"] for item in vector_subset}
+                    reranked_subset = [
+                        item for item in case_record["reranked_results"] if item["id"] in vector_ids
+                    ]
+                    no_rerank_scores.append(score_results(vector_subset[:top_k], case_record["gold"]))
+                    rerank_scores.append(score_results(reranked_subset[:top_k], case_record["gold"]))
+                runs.append(
+                    {
+                        "config": {
+                            "top_k": top_k,
+                            "n_candidates": n_candidates,
+                            "query_prefix": use_query_prefix,
+                        },
+                        "summary": {
+                            "no_rerank": summarize(no_rerank_scores),
+                            "rerank": summarize(rerank_scores),
+                        },
+                    }
+                )
+    return runs
 
 
 def print_summary(summary: dict[str, dict[str, float]], total_cases: int) -> None:
@@ -131,19 +193,54 @@ def print_summary(summary: dict[str, dict[str, float]], total_cases: int) -> Non
     Console().print(table)
 
 
+def print_scan(runs: list[dict[str, Any]], total_cases: int) -> None:
+    table = Table(title=f"Retrieval parameter scan ({total_cases} cases)")
+    table.add_column("n_candidates", justify="right")
+    table.add_column("top_k", justify="right")
+    table.add_column("query_prefix")
+    table.add_column("mode")
+    table.add_column("hit@3", justify="right")
+    table.add_column("hit@5", justify="right")
+    table.add_column("MRR", justify="right")
+
+    for run in runs:
+        config = run["config"]
+        for mode_name in ("no_rerank", "rerank"):
+            metrics = run["summary"][mode_name]
+            table.add_row(
+                str(config["n_candidates"]),
+                str(config["top_k"]),
+                "yes" if config["query_prefix"] else "no",
+                mode_name,
+                f"{metrics['hit@3']:.3f}",
+                f"{metrics['hit@5']:.3f}",
+                f"{metrics['mrr']:.3f}",
+            )
+
+    Console().print(table)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate Chroma retrieval with and without reranker")
     parser.add_argument("--eval-set", type=Path, default=DEFAULT_EVAL_SET)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     parser.add_argument("--n-candidates", type=int, default=DEFAULT_N_CANDIDATES)
+    parser.add_argument("--query-prefix", default="", help="Optional query-side prefix before embedding/retrieval")
+    parser.add_argument("--bge-query-prefix", action="store_true", help="Use the standard BGE retrieval query prefix")
+    parser.add_argument("--scan", action="store_true", help="Run the 2026-06-15 parameter scan grid")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     cases = load_eval_set(args.eval_set)
-    payload = evaluate(cases, n_candidates=args.n_candidates, top_k=args.top_k)
+    query_prefix = BGE_QUERY_PREFIX if args.bge_query_prefix else args.query_prefix
+    payload = (
+        {"scan": scan_parameters(cases)}
+        if args.scan
+        else evaluate(cases, n_candidates=args.n_candidates, top_k=args.top_k, query_prefix=query_prefix)
+    )
     output_path = args.out or Path("runs/eval") / f"{date.today().isoformat()}.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -153,13 +250,18 @@ def main() -> None:
         "config": {
             "top_k": args.top_k,
             "n_candidates": args.n_candidates,
+            "query_prefix": bool(query_prefix),
+            "scan": args.scan,
             "case_count": len(cases),
         },
         **payload,
     }
     output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print_summary(result["summary"], len(cases))
+    if args.scan:
+        print_scan(result["scan"], len(cases))
+    else:
+        print_summary(result["summary"], len(cases))
     Console().print(f"[green]Wrote eval results to {output_path}[/green]")
 
 

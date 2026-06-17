@@ -8,7 +8,7 @@ load_dotenv()
 import streamlit as st
 
 from src.agent.state import AgentState
-from src.schemas.plan import JobInput
+from src.schemas.plan import Evidence, JobInput
 
 WORKFLOW_STEPS = [
     ("intake", "解析输入与生成检索词"),
@@ -83,6 +83,54 @@ def _run_workflow_with_progress(job: JobInput, output_dir: str) -> dict:
     return state
 
 
+def _format_score(score: float | None) -> str:
+    if score is None:
+        return "未提供"
+    return f"{score:.4f}"
+
+
+def _source_markdown(source: str) -> str:
+    if not source:
+        return "来源：未提供"
+    if source.startswith(("http://", "https://")):
+        return f"来源：[{source}]({source})"
+    return f"来源：`{source}`"
+
+
+def _render_evidence_items(evidences: list[Evidence], empty_text: str) -> None:
+    if not evidences:
+        st.info(empty_text)
+        return
+
+    for evidence in evidences:
+        with st.expander(f"[{evidence.id}] {evidence.title}", expanded=False):
+            st.markdown(f"**引用 ID：`[{evidence.id}]`**")
+            st.caption(
+                f"类型：{evidence.source_type.upper()} | 分数：{_format_score(evidence.score)}"
+            )
+            st.markdown(_source_markdown(evidence.url_or_path))
+            if evidence.excerpt:
+                st.write(evidence.excerpt[:500])
+
+
+def _render_evidence_panel(web_evidences: list[Evidence], kb_evidences: list[Evidence]) -> None:
+    total = len(web_evidences) + len(kb_evidences)
+    st.subheader("证据面板")
+    st.caption("计划正文中的 `[web-N]` / `[kb-N]` 引用 ID 与这里一一对应。")
+    st.metric("证据总数", total)
+    count_col1, count_col2 = st.columns(2)
+    count_col1.metric("Web", len(web_evidences))
+    count_col2.metric("KB", len(kb_evidences))
+
+    web_tab, kb_tab = st.tabs(
+        [f"Web ({len(web_evidences)})", f"KB ({len(kb_evidences)})"]
+    )
+    with web_tab:
+        _render_evidence_items(web_evidences, "暂无 Web 证据")
+    with kb_tab:
+        _render_evidence_items(kb_evidences, "暂无 KB 证据")
+
+
 st.set_page_config(page_title="jobagent · 面试备战计划", layout="wide")
 st.title("jobagent · AI 面试备战计划生成器")
 
@@ -113,16 +161,14 @@ if run_btn:
         final = _run_workflow_with_progress(job, output_dir)
 
         warnings = final.get("warnings", [])
-        web_count = len(final.get("web_evidences", []))
-        kb_count = len(final.get("kb_evidences", []))
+        web_evidences = final.get("web_evidences", [])
+        kb_evidences = final.get("kb_evidences", [])
 
         if warnings:
             st.warning("运行告警：\n" + "\n".join(f"- {w}" for w in warnings))
 
         with st.sidebar:
-            st.subheader("证据计数")
-            st.metric("Web 证据", web_count)
-            st.metric("KB 证据", kb_count)
+            _render_evidence_panel(web_evidences, kb_evidences)
 
         if not final.get("plan"):
             errors = final.get("validation_errors", [])
@@ -157,12 +203,3 @@ if run_btn:
                                 file_name="plan.json",
                                 mime="application/json",
                             )
-
-                # Show evidence summary in sidebar
-                all_evidences = final.get("all_evidences", [])
-                if all_evidences:
-                    with st.expander(f"📚 证据来源（共 {len(all_evidences)} 条）"):
-                        for e in all_evidences:
-                            st.write(f"**[{e.id}]** ({e.source_type}) {e.title}")
-                            if e.url_or_path:
-                                st.caption(e.url_or_path)

@@ -7,6 +7,82 @@ load_dotenv()
 
 import streamlit as st
 
+from src.agent.state import AgentState
+from src.schemas.plan import JobInput
+
+WORKFLOW_STEPS = [
+    ("intake", "解析输入与生成检索词"),
+    ("research", "联网调研岗位与公司信息"),
+    ("retrieve", "检索本地知识库"),
+    ("rerank", "重排并编号证据"),
+    ("generate", "生成结构化备战计划"),
+    ("validate", "校验计划与引用"),
+    ("render", "保存 Markdown / JSON 结果"),
+]
+
+STEP_LABELS = dict(WORKFLOW_STEPS)
+STEP_INDEX = {node: index for index, (node, _) in enumerate(WORKFLOW_STEPS, start=1)}
+
+
+def _initial_state(job_input: JobInput, output_dir: str) -> AgentState:
+    return {
+        "job_input": job_input,
+        "search_queries": [],
+        "kb_query": "",
+        "web_evidences": [],
+        "kb_evidences": [],
+        "all_evidences": [],
+        "plan_json": None,
+        "plan": None,
+        "validation_errors": [],
+        "warnings": [],
+        "retry_count": 0,
+        "output_dir": output_dir,
+    }
+
+
+def _run_workflow_with_progress(job: JobInput, output_dir: str) -> dict:
+    from src.agent.graph import build_graph
+
+    state: dict = _initial_state(job, output_dir)
+    graph = build_graph()
+
+    progress = st.progress(0, text="准备启动 workflow")
+    with st.status("准备启动 workflow", expanded=True) as status:
+        completed_nodes: set[str] = set()
+        for event in graph.stream(
+            state,
+            config={"recursion_limit": 25},
+            stream_mode="updates",
+        ):
+            for node_name, update in event.items():
+                if update:
+                    state.update(update)
+
+                completed_nodes.add(node_name)
+                step_no = STEP_INDEX.get(node_name, len(completed_nodes))
+                total_steps = len(WORKFLOW_STEPS)
+                label = STEP_LABELS.get(node_name, node_name)
+                retry_count = state.get("retry_count", 0)
+                retry_suffix = (
+                    f"（第 {retry_count + 1} 次生成尝试）"
+                    if node_name == "generate" and retry_count
+                    else ""
+                )
+
+                progress.progress(
+                    min(step_no / total_steps, 1.0),
+                    text=f"{step_no}/{total_steps} {label}",
+                )
+                status.write(f"完成：{label}{retry_suffix}")
+                status.update(label=f"已完成：{label}", state="running")
+
+        progress.progress(1.0, text="7/7 workflow 完成")
+        status.update(label="workflow 完成", state="complete", expanded=False)
+
+    return state
+
+
 st.set_page_config(page_title="jobagent · 面试备战计划", layout="wide")
 st.title("jobagent · AI 面试备战计划生成器")
 
@@ -25,6 +101,7 @@ with col2:
     result_placeholder = st.empty()
 
 if run_btn:
+    output_dir = out_dir.strip() or "runs/streamlit"
     if not company.strip():
         st.error("请填写目标公司")
     elif not role.strip():
@@ -32,12 +109,8 @@ if run_btn:
     elif not jd.strip():
         st.error("请填写 JD 文本")
     else:
-        from src.agent.graph import run_workflow
-        from src.schemas.plan import JobInput
-
         job = JobInput(company=company.strip(), role=role.strip(), jd_text=jd.strip())
-        with st.spinner("生成中，预计需要 1-3 分钟..."):
-            final = run_workflow(job, out_dir.strip() or "runs/streamlit")
+        final = _run_workflow_with_progress(job, output_dir)
 
         warnings = final.get("warnings", [])
         web_count = len(final.get("web_evidences", []))
@@ -58,8 +131,8 @@ if run_btn:
                 for e in errors:
                     st.write(f"- {e}")
         else:
-            plan_md_path = Path(out_dir) / "plan.md"
-            plan_json_path = Path(out_dir) / "plan.json"
+            plan_md_path = Path(output_dir) / "plan.md"
+            plan_json_path = Path(output_dir) / "plan.json"
 
             with col2:
                 st.success("生成完成！")
